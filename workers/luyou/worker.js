@@ -2053,7 +2053,7 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
         }
       });
 
-      const hasNumericIds = finalKeys.length > 0 && finalKeys.every((val) => /^d+$/.test(String(val)));
+      const hasNumericIds = finalKeys.length > 0 && finalKeys.every((val) => /^\d+$/.test(String(val)));
       const payload = hasNumericIds
         ? { ids: finalKeys.map(Number) }
         : { subdomains: finalKeys };

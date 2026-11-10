@@ -1384,6 +1384,62 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
       font-size: 13px;
     }
     .form-group input:focus { border-color: var(--primary); }
+    .tag-input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      width: fit-content;
+      max-width: 100%;
+    }
+    .tag-input-wrapper input.adaptive-width { max-width: calc(100% - 34px); }
+    .tag-dropdown-toggle {
+      flex: 0 0 28px;
+      height: 32px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--input-bg);
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .tag-suggestions {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      min-width: min(240px, calc(100vw - 48px));
+      width: min(360px, calc(100vw - 40px));
+      max-width: min(360px, calc(100vw - 40px));
+      max-height: 200px;
+      overflow-y: auto;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--input-bg);
+      box-shadow: var(--card-shadow);
+    }
+    .tag-suggestions[hidden] { display: none; }
+    .tag-suggestions button {
+      padding: 7px 9px;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.3;
+      text-align: left;
+      cursor: pointer;
+    }
+    .tag-suggestions button:hover { background: var(--secondary-bg); }
+    .tag-suggestions-empty { grid-column: 1 / -1; padding: 7px 9px; color: var(--text-soft); font-size: 12px; }
+    .form-group input.adaptive-width {
+      width: auto;
+      min-width: 15ch;
+      max-width: 100%;
+      field-sizing: content;
+    }
     .target-path-fields {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(90px, 0.36fr);
@@ -1565,16 +1621,26 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
         </div>
       </div>
       <div class="form-group">
-        <label>备注名称 (例如: 个人博客)</label>
-        <input type="text" id="ipt-title" placeholder="">
+        <label>网站名称 (例如: 个人博客)</label>
+        <input type="text" id="ipt-title" class="adaptive-width" placeholder="">
       </div>
       <div class="form-group">
         <label>分类 (例如: 个人站点)</label>
-        <input type="text" id="ipt-category" placeholder="">
+        <input type="text" id="ipt-category" class="adaptive-width" list="category-options" placeholder="">
+        <datalist id="category-options">
+          ${categories.map((category) => `<option value="${escapeHtml(category)}"></option>`).join('')}
+        </datalist>
       </div>
       <div class="form-group">
         <label>标签 (多个标签用逗号分隔,例如:API,cloudflare,影视)</label>
-        <input type="text" id="ipt-tags" placeholder="">
+        <div class="tag-input-wrapper" id="tag-input-wrapper">
+          <input type="text" id="ipt-tags" class="adaptive-width" placeholder="">
+          <button type="button" class="tag-dropdown-toggle" onclick="toggleTagSuggestions()" aria-label="选择已有标签" title="选择已有标签">▾</button>
+          <div class="tag-suggestions" id="tag-suggestions" hidden>
+            ${tags.map((tag) => `<button type="button" data-tag="${escapeHtml(tag)}" onclick="appendTagSuggestion(this.dataset.tag)">${escapeHtml(tag)}</button>`).join('')}
+            <span class="tag-suggestions-empty" hidden>暂无可选标签</span>
+          </div>
+        </div>
       </div>
       <div class="form-group">
         <div class="target-path-fields">
@@ -1584,13 +1650,13 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
           </div>
           <div>
             <label for="ipt-navigation-path">路径 (仅用于跳转)</label>
-            <input type="text" id="ipt-navigation-path" placeholder="/path">
+            <input type="text" id="ipt-navigation-path" placeholder="">
           </div>
         </div>
       </div>
       <div class="form-group" id="subdomain-group">
         <label>子域名前缀 <span class="required-star">*</span> (必填，例如: blog)</label>
-        <input type="text" id="ipt-subdomain" placeholder="必填">
+        <input type="text" id="ipt-subdomain" class="adaptive-width" placeholder="必填">
       </div>
       <div class="modal-buttons">
         <button class="btn btn-secondary" onclick="closeModal()">取消</button>
@@ -1792,6 +1858,47 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
       }
     }
 
+    function initializeTagSuggestions() {
+      const input = document.getElementById('ipt-tags');
+      const wrapper = document.getElementById('tag-input-wrapper');
+      input.addEventListener('focus', () => { updateTagSuggestions(); });
+      input.addEventListener('input', updateTagSuggestions);
+      document.addEventListener('click', (event) => {
+        if (!wrapper.contains(event.target)) document.getElementById('tag-suggestions').hidden = true;
+      });
+      updateTagSuggestions();
+    }
+
+    function updateTagSuggestions() {
+      const input = document.getElementById('ipt-tags');
+      const suggestions = document.getElementById('tag-suggestions');
+      const selectedTags = new Set(input.value.split(',').map((tag) => tag.trim().toLowerCase()).filter(Boolean));
+      const buttons = [...suggestions.querySelectorAll('button[data-tag]')];
+      let availableCount = 0;
+      buttons.forEach((button) => {
+        button.hidden = selectedTags.has(button.dataset.tag.toLowerCase());
+        if (!button.hidden) availableCount++;
+      });
+      suggestions.querySelector('.tag-suggestions-empty').hidden = availableCount > 0;
+    }
+
+    function toggleTagSuggestions() {
+      const suggestions = document.getElementById('tag-suggestions');
+      updateTagSuggestions();
+      suggestions.hidden = !suggestions.hidden;
+    }
+
+    function appendTagSuggestion(tag) {
+      const input = document.getElementById('ipt-tags');
+      const selectedTags = input.value.split(',').map((value) => value.trim()).filter(Boolean);
+      if (!selectedTags.some((value) => value.toLowerCase() === tag.toLowerCase())) {
+        selectedTags.push(tag);
+        input.value = selectedTags.join(', ') + ', ';
+      }
+      updateTagSuggestions();
+      input.focus();
+    }
+
     function clearFilters() {
       document.querySelectorAll('.filter-options').forEach((group) => {
         const allButton = group.querySelector('.filter-chip[data-value=""]');
@@ -1974,7 +2081,7 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
       if (isCloudflareRoute) {
         const tags = tagsInput.value.split(',').map(tag => tag.trim()).filter(Boolean);
         if (!tags.some(tag => tag.toLowerCase() === 'cloudflare')) {
-          tags.push('cloudflare');
+          tags.push('cloudflare,');
         }
         tagsInput.value = tags.join(', ');
       }
@@ -2019,6 +2126,7 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
       const adminEnabled = localStorage.getItem('admin_mode') === '1' && (!${needPassword} || !!localStorage.getItem('admin_pwd'));
       const savedDisplayMode = localStorage.getItem('route_simple_view');
       setCardDisplayMode(savedDisplayMode !== '0');
+      initializeTagSuggestions();
       restoreRouteFilters();
       filterRoutes();
       initializeRouteSorting();
