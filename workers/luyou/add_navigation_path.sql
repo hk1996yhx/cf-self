@@ -1,0 +1,1 @@
+ALTER TABLE routes ADD COLUMN navigation_path TEXT NOT NULL DEFAULT '';
