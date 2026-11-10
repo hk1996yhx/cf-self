@@ -1,0 +1,19 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "cf-sql",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-08-01",
+	"assets": {
+		"directory": "./public",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "xxxxxx",
+			"database_id": "DATABASE_ID_INJECTED_VIA_ENV",
+			"migrations_dir": "migrations"
+		}
+	]
+}

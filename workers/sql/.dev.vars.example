@@ -1,0 +1,3 @@
+SQL_NORMAL_PASSWORD="replace-with-a-strong-crud-password"
+SQL_ADMIN_PASSWORD="replace-with-a-different-admin-password"
+AUTH_SECRET="replace-with-at-least-32-random-characters"

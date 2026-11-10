@@ -1,0 +1,10 @@
+.wrangler/
+node_modules/
+dist/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+coverage/
+.DS_Store
+tests/*
+

@@ -1,0 +1,23 @@
+{
+  "name": "cf-sql",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Workers + D1 HTTP SQL API and visual console",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "node scripts/build.js",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260826.1",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.30.0"
+  }
+}
