@@ -249,13 +249,13 @@ async function handleAdminApi(request, env) {
            ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, id ASC`
         ).all();
         const currentIds = new Set(currentRoutes.map((route) => Number(route.id)));
-        const submittedIds = new Set(orderedIds.filter((id) => currentIds.has(id)));
-        const completeOrder = [
-          ...orderedIds.filter((id) => currentIds.has(id)),
-          ...currentRoutes
-            .map((route) => Number(route.id))
-            .filter((id) => !submittedIds.has(id)),
-        ];
+        if (
+          currentIds.size !== orderedIds.length ||
+          orderedIds.some((id) => !currentIds.has(id))
+        ) {
+          return jsonResponse({ error: '服务列表已变更，请刷新页面后重新排序' }, 409);
+        }
+        const completeOrder = orderedIds;
         if (completeOrder.length) {
           const temporaryOffsetRow = await env.DB.prepare(
             'SELECT COALESCE(MAX(sort_order), -1) + 1 AS temporary_offset FROM routes'
@@ -311,15 +311,13 @@ async function handleAdminApi(request, env) {
       const currentSubdomains = new Set(
         currentRoutes.map((route) => String(route.subdomain).toLowerCase())
       );
-      const submittedSubdomains = new Set(
-        orderedSubdomains.filter((subdomain) => currentSubdomains.has(subdomain))
-      );
-      const completeOrder = [
-        ...orderedSubdomains.filter((subdomain) => currentSubdomains.has(subdomain)),
-        ...currentRoutes
-          .map((route) => String(route.subdomain).toLowerCase())
-          .filter((subdomain) => !submittedSubdomains.has(subdomain)),
-      ];
+      if (
+        currentSubdomains.size !== orderedSubdomains.length ||
+        orderedSubdomains.some((subdomain) => !currentSubdomains.has(subdomain))
+      ) {
+        return jsonResponse({ error: '服务列表已变更，请刷新页面后重新排序' }, 409);
+      }
+      const completeOrder = orderedSubdomains;
       if (completeOrder.length) {
         const temporaryOffsetRow = await env.DB.prepare(
           'SELECT COALESCE(MAX(sort_order), -1) + 1 AS temporary_offset FROM routes'
@@ -2115,7 +2113,7 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
         }
       });
 
-      const hasNumericIds = finalKeys.length > 0 && finalKeys.every((val) => /^\d+$/.test(String(val)));
+      const hasNumericIds = finalKeys.length > 0 && finalKeys.every((val) => /^[0-9]+$/.test(String(val)));
       const payload = hasNumericIds
         ? { ids: finalKeys.map(Number) }
         : { subdomains: finalKeys };
