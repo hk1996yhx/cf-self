@@ -243,29 +243,54 @@ async function handleAdminApi(request, env) {
           return jsonResponse({ error: '排序数据包含无效或重复的服务 ID' }, 400);
         }
 
+        await initializeRouteSortOrders(env);
         const { results: currentRoutes = [] } = await env.DB.prepare(
-          'SELECT id FROM routes'
+          `SELECT id, sort_order FROM routes
+           ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, id ASC`
         ).all();
         const currentIds = new Set(currentRoutes.map((route) => Number(route.id)));
-        if (
-          currentIds.size !== orderedIds.length ||
-          orderedIds.some((id) => !currentIds.has(id))
-        ) {
-          return jsonResponse({ error: '服务列表已变更，请刷新页面后重新排序' }, 409);
-        }
-
-        await initializeRouteSortOrders(env);
-        if (orderedIds.length) {
+        const submittedIds = new Set(orderedIds.filter((id) => currentIds.has(id)));
+        const completeOrder = [
+          ...orderedIds.filter((id) => currentIds.has(id)),
+          ...currentRoutes
+            .map((route) => Number(route.id))
+            .filter((id) => !submittedIds.has(id)),
+        ];
+        if (completeOrder.length) {
+          const temporaryOffsetRow = await env.DB.prepare(
+            'SELECT COALESCE(MAX(sort_order), -1) + 1 AS temporary_offset FROM routes'
+          ).first();
+          const temporaryOffset = Number(temporaryOffsetRow?.temporary_offset ?? 0);
           await env.DB.batch(
-            orderedIds.map((id, sortOrder) =>
-              env.DB.prepare(
-                'UPDATE routes SET sort_order = ?1 WHERE id = ?2'
-              ).bind(sortOrder, id)
-            )
+            [
+              ...completeOrder.map((id, index) =>
+                env.DB.prepare(
+                  'UPDATE routes SET sort_order = ?1 WHERE id = ?2'
+                ).bind(temporaryOffset + index, id)
+              ),
+              ...completeOrder.map((id, sortOrder) =>
+                env.DB.prepare(
+                  'UPDATE routes SET sort_order = ?1 WHERE id = ?2'
+                ).bind(sortOrder, id)
+              ),
+            ]
           );
         }
 
-        return jsonResponse({ success: true, message: '排序已保存！' });
+        const { results: savedRoutes = [] } = await env.DB.prepare(
+          'SELECT id, sort_order FROM routes ORDER BY sort_order ASC, id ASC'
+        ).all();
+        const savedIds = savedRoutes.map((route) => Number(route.id));
+        if (
+          savedIds.length !== completeOrder.length ||
+          savedIds.some((id, index) => id !== completeOrder[index])
+        ) {
+          return jsonResponse({
+            error: `D1 排序校验失败。期望 ID: ${completeOrder.join(',')}；实际 ID(sort_order): ${savedRoutes.map((route) => `${route.id}(${route.sort_order})`).join(',')}`,
+          }, 500);
+        }
+
+        return jsonResponse({ success: true, message: '排序已保存！', order: savedIds });
       }
 
       const orderedSubdomains = subdomains.map((subdomain) =>
@@ -278,31 +303,58 @@ async function handleAdminApi(request, env) {
         return jsonResponse({ error: '排序数据包含无效或重复的服务' }, 400);
       }
 
+      await initializeRouteSortOrders(env);
       const { results: currentRoutes = [] } = await env.DB.prepare(
-        'SELECT subdomain FROM routes'
+        `SELECT subdomain, sort_order FROM routes
+         ORDER BY CASE WHEN sort_order IS NULL THEN 1 ELSE 0 END, sort_order ASC, id ASC`
       ).all();
       const currentSubdomains = new Set(
         currentRoutes.map((route) => String(route.subdomain).toLowerCase())
       );
-      if (
-        currentSubdomains.size !== orderedSubdomains.length ||
-        orderedSubdomains.some((subdomain) => !currentSubdomains.has(subdomain))
-      ) {
-        return jsonResponse({ error: '服务列表已变更，请刷新页面后重新排序' }, 409);
-      }
-
-      await initializeRouteSortOrders(env);
-      if (orderedSubdomains.length) {
+      const submittedSubdomains = new Set(
+        orderedSubdomains.filter((subdomain) => currentSubdomains.has(subdomain))
+      );
+      const completeOrder = [
+        ...orderedSubdomains.filter((subdomain) => currentSubdomains.has(subdomain)),
+        ...currentRoutes
+          .map((route) => String(route.subdomain).toLowerCase())
+          .filter((subdomain) => !submittedSubdomains.has(subdomain)),
+      ];
+      if (completeOrder.length) {
+        const temporaryOffsetRow = await env.DB.prepare(
+          'SELECT COALESCE(MAX(sort_order), -1) + 1 AS temporary_offset FROM routes'
+        ).first();
+        const temporaryOffset = Number(temporaryOffsetRow?.temporary_offset ?? 0);
         await env.DB.batch(
-          orderedSubdomains.map((subdomain, sortOrder) =>
-            env.DB.prepare(
-              'UPDATE routes SET sort_order = ?1 WHERE subdomain = ?2'
-            ).bind(sortOrder, subdomain)
-          )
+          [
+            ...completeOrder.map((subdomain, index) =>
+              env.DB.prepare(
+                'UPDATE routes SET sort_order = ?1 WHERE lower(subdomain) = ?2'
+              ).bind(temporaryOffset + index, subdomain)
+            ),
+            ...completeOrder.map((subdomain, sortOrder) =>
+              env.DB.prepare(
+                'UPDATE routes SET sort_order = ?1 WHERE lower(subdomain) = ?2'
+              ).bind(sortOrder, subdomain)
+            ),
+          ]
         );
       }
 
-      return jsonResponse({ success: true, message: '排序已保存！' });
+      const { results: savedRoutes = [] } = await env.DB.prepare(
+        'SELECT subdomain, sort_order FROM routes ORDER BY sort_order ASC, id ASC'
+      ).all();
+      const savedSubdomains = savedRoutes.map((route) => String(route.subdomain).toLowerCase());
+      if (
+        savedSubdomains.length !== completeOrder.length ||
+        savedSubdomains.some((subdomain, index) => subdomain !== completeOrder[index])
+      ) {
+        return jsonResponse({
+          error: `D1 排序校验失败。期望子域名: ${completeOrder.join(',')}；实际顺序(sort_order): ${savedRoutes.map((route) => `${route.subdomain}(${route.sort_order})`).join(',')}`,
+        }, 500);
+      }
+
+      return jsonResponse({ success: true, message: '排序已保存！', order: savedSubdomains });
     }
 
     if (action === 'delete') {
@@ -1958,12 +2010,14 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
 
         handle.addEventListener('dragend', () => {
           const shouldSave = routeOrderChanged;
+          const initialKeys = dragInitialKeys;
+          const visibleSlots = dragVisibleSlots;
           if (draggedRouteCard) {
             draggedRouteCard.classList.remove('is-dragging');
           }
           draggedRouteCard = null;
           routeOrderChanged = false;
-          if (shouldSave) queueRouteOrderSave();
+          if (shouldSave) queueRouteOrderSave(initialKeys, visibleSlots);
         });
       });
 
@@ -1991,11 +2045,15 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
           event.preventDefault();
           event.stopPropagation();
           const rect = targetCard.getBoundingClientRect();
-          const insertBefore = event.clientX < rect.left + rect.width / 2;
-          const insertionPoint = insertBefore ? targetCard : targetCard.nextSibling;
+          const draggedRect = draggedRouteCard.getBoundingClientRect();
+          const sharesRow = draggedRect.top < rect.bottom && draggedRect.bottom > rect.top;
+          const insertBefore = sharesRow
+            ? event.clientX < rect.left + rect.width / 2
+            : event.clientY < rect.top + rect.height / 2;
+          const insertionPoint = insertBefore ? targetCard : targetCard.nextElementSibling;
           const isAlreadyInPosition = insertBefore
-            ? draggedRouteCard.nextSibling === targetCard
-            : draggedRouteCard.previousSibling === targetCard;
+            ? draggedRouteCard.nextElementSibling === targetCard
+            : draggedRouteCard.previousElementSibling === targetCard;
 
           if (!isAlreadyInPosition && insertionPoint !== draggedRouteCard) {
             routesContainer.insertBefore(draggedRouteCard, insertionPoint);
@@ -2007,36 +2065,40 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
       updateRouteSortingAvailability();
     }
 
-    function queueRouteOrderSave() {
-      routeOrderSaveQueue = routeOrderSaveQueue
-        .catch(() => {})
-        .then(() => saveRouteOrder());
-    }
-
-    async function saveRouteOrder() {
+    function queueRouteOrderSave(initialKeys, visibleSlots) {
       const routesContainer = document.getElementById('routes-container');
       if (!routesContainer) return;
 
       const currentCards = [...routesContainer.querySelectorAll('.route-card')];
-      const currentVisibleCards = currentCards.filter((card) => card.style.display !== 'none');
-      const currentVisibleKeys = currentVisibleCards
+      const currentVisibleKeys = currentCards
+        .filter((card) => card.style.display !== 'none')
         .map((card) => card.dataset.id || card.dataset.subdomain)
         .filter(Boolean);
+      const canMapVisibleSlots =
+        initialKeys.length === currentCards.length &&
+        visibleSlots.length === currentVisibleKeys.length;
+      const finalKeys = canMapVisibleSlots
+        ? [...initialKeys]
+        : currentCards
+            .map((card) => card.dataset.id || card.dataset.subdomain)
+            .filter(Boolean);
 
-      let finalKeys = [];
-      if (
-        dragInitialKeys.length === currentCards.length &&
-        dragVisibleSlots.length === currentVisibleKeys.length
-      ) {
-        finalKeys = [...dragInitialKeys];
-        dragVisibleSlots.forEach((slotIndex, i) => {
-          finalKeys[slotIndex] = currentVisibleKeys[i];
+      if (canMapVisibleSlots) {
+        visibleSlots.forEach((slotIndex, index) => {
+          finalKeys[slotIndex] = currentVisibleKeys[index];
         });
-      } else {
-        finalKeys = currentCards
-          .map((card) => card.dataset.id || card.dataset.subdomain)
-          .filter(Boolean);
       }
+
+      routeOrderSaveQueue = routeOrderSaveQueue
+        .catch(() => {})
+        .then(() => saveRouteOrder(finalKeys));
+    }
+
+    async function saveRouteOrder(finalKeys) {
+      const routesContainer = document.getElementById('routes-container');
+      if (!routesContainer) return;
+
+      const currentCards = [...routesContainer.querySelectorAll('.route-card')];
 
       // 按槽位映射后的全量顺序规范化 DOM 树，保证全量与过滤视图一致
       const cardMap = new Map();
@@ -2066,6 +2128,15 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
         });
         const result = await res.json();
         if (!res.ok) throw new Error(result.error || '排序保存失败');
+        if (Array.isArray(result.order)) {
+          const cardMap = new Map(
+            currentCards.map((card) => [card.dataset.id || card.dataset.subdomain, card])
+          );
+          result.order.forEach((key) => {
+            const card = cardMap.get(String(key));
+            if (card) routesContainer.appendChild(card);
+          });
+        }
       } catch (err) {
         alert('排序保存失败：' + err.message + '，页面将恢复为已保存的顺序。');
         location.reload();
@@ -2253,6 +2324,9 @@ function renderDashboard(routes, baseDomain, needPassword, env = {}) {
 
   return new Response(html, {
     status: 200,
-    headers: { 'Content-Type': 'text/html; charset=UTF-8' },
+    headers: {
+      'Content-Type': 'text/html; charset=UTF-8',
+      'Cache-Control': 'no-store',
+    },
   });
 }
